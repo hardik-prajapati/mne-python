@@ -18,13 +18,57 @@ import re
 import numpy as np
 
 from ...utils import verbose, logger, warn
-from ..utils import _blk_read_lims
+from ..utils import _blk_read_lims, _deprecate_montage
 from ..base import BaseRaw
 from ..meas_info import _empty_info, _unique_channel_names, DATE_NONE
 from ..constants import FIFF
 from ...filter import resample
-from ...utils import fill_doc
-from ...annotations import Annotations
+from ...utils import copy_function_doc_to_method_doc, deprecated, fill_doc
+from ...annotations import Annotations, events_from_annotations
+
+
+@deprecated('find_edf_events is deprecated in 0.18, and will be removed'
+            ' in 0.19. Please use `mne.events_from_annotations` instead')
+def find_edf_events(raw):
+    """Get original EDF events as read from the header.
+
+    For GDF, the values are returned in form
+    [n_events, pos, typ, chn, dur]
+    where:
+
+    ========  ===================================  =======
+    name      description                          type
+    ========  ===================================  =======
+    n_events  The number of all events             integer
+    pos       Beginning of the events in samples   array
+    typ       The event identifiers                array
+    chn       The associated channels (0 for all)  array
+    dur       The durations of the events          array
+    ========  ===================================  =======
+
+    For EDF+, the values are returned in form
+    n_events * [onset, dur, desc]
+    where:
+
+    ========  ===================================  =======
+    name      description                          type
+    ========  ===================================  =======
+    onset     Onset of the event in seconds        float
+    dur       Duration of the event in seconds     float
+    desc      Description of the event             str
+    ========  ===================================  =======
+
+    Parameters
+    ----------
+    raw : instance of RawEDF
+        The raw object for finding the events.
+
+    Returns
+    -------
+    events : ndarray
+        The events as they are in the file header.
+    """
+    return events_from_annotations(raw)
 
 
 @fill_doc
@@ -35,6 +79,7 @@ class RawEDF(BaseRaw):
     ----------
     input_fname : str
         Path to the EDF, EDF+ or BDF file.
+    %(montage_deprecated)s
     eog : list or tuple
         Names of channels or list of indices that should be designated EOG
         channels. Values should correspond to the electrodes in the file.
@@ -61,12 +106,6 @@ class RawEDF(BaseRaw):
         different sampling rates to avoid unnecessary resampling.
     %(preload)s
     %(verbose)s
-
-    See Also
-    --------
-    mne.io.Raw : Documentation of attributes and methods.
-    mne.io.read_raw_edf : Recommended way to read EDF/EDF+ files.
-    mne.io.read_raw_bdf : Recommended way to read BDF files.
 
     Notes
     -----
@@ -104,10 +143,16 @@ class RawEDF(BaseRaw):
     If channels named 'status' or 'trigger' are present, they are considered as
     STIM channels by default. Use func:`mne.find_events` to parse events
     encoded in such analog stim channels.
+
+    See Also
+    --------
+    mne.io.Raw : Documentation of attributes and methods.
+    mne.io.read_raw_edf : Recommended way to read EDF/EDF+ files.
+    mne.io.read_raw_bdf : Recommended way to read BDF files.
     """
 
     @verbose
-    def __init__(self, input_fname, eog=None, misc=None,
+    def __init__(self, input_fname, montage, eog=None, misc=None,
                  stim_channel='auto', exclude=(), preload=False, verbose=None):
         logger.info('Extracting EDF parameters from {}...'.format(input_fname))
         input_fname = os.path.abspath(input_fname)
@@ -125,14 +170,18 @@ class RawEDF(BaseRaw):
 
         # Read annotations from file and set it
         onset, duration, desc = list(), list(), list()
-        if len(edf_info['tal_idx']) > 0:
-            # Read TAL data exploiting the header info (no regexp)
-            tal_data = self._read_segment_file([], [], 0, 0, int(self.n_times),
-                                               None, None)
-            onset, duration, desc = _read_annotations_edf(tal_data[0])
 
-        self.set_annotations(Annotations(onset=onset, duration=duration,
-                                         description=desc, orig_time=None))
+        print("edf_info['tal_idx'] = ", edf_info['tal_idx'])
+        # if len(edf_info['tal_idx']) > 0:
+        #     # Read TAL data exploiting the header info (no regexp)
+        #     tal_data = self._read_segment_file([], [], 0, 0, int(self.n_times),
+        #                                        None, None)
+        #     onset, duration, desc = _read_annotations_edf(tal_data[0])
+
+        # self.set_annotations(Annotations(onset=onset, duration=duration,
+        #                                  description=desc, orig_time=None))
+
+        _deprecate_montage(self, "read_raw_edf", montage)
 
     @verbose
     def _read_segment_file(self, data, idx, fi, start, stop, cals, mult):
@@ -140,6 +189,12 @@ class RawEDF(BaseRaw):
         return _read_segment_file(data, idx, fi, start, stop,
                                   self._raw_extras[fi], self.info['chs'],
                                   self._filenames[fi])
+
+    @copy_function_doc_to_method_doc(find_edf_events)
+    @deprecated('find_edf_events is deprecated in 0.18, and will be removed'
+                ' in 0.19. Please use `mne.events_from_annotations` instead')
+    def find_edf_events(self):
+        return events_from_annotations(self)
 
 
 @fill_doc
@@ -150,6 +205,7 @@ class RawGDF(BaseRaw):
     ----------
     input_fname : str
         Path to the GDF file.
+    %(montage_deprecated)s
     eog : list or tuple
         Names of channels or list of indices that should be designated EOG
         channels. Values should correspond to the electrodes in the file.
@@ -169,20 +225,20 @@ class RawGDF(BaseRaw):
     %(preload)s
     %(verbose)s
 
-    See Also
-    --------
-    mne.io.Raw : Documentation of attributes and methods.
-    mne.io.read_raw_gdf : Recommended way to read GDF files.
-
     Notes
     -----
     If channels named 'status' or 'trigger' are present, they are considered as
     STIM channels by default. Use func:`mne.find_events` to parse events
     encoded in such analog stim channels.
+
+    See Also
+    --------
+    mne.io.Raw : Documentation of attributes and methods.
+    mne.io.read_raw_gdf : Recommended way to read GDF files.
     """
 
     @verbose
-    def __init__(self, input_fname, eog=None, misc=None,
+    def __init__(self, input_fname, montage, eog=None, misc=None,
                  stim_channel='auto', exclude=(), preload=False, verbose=None):
         logger.info('Extracting EDF parameters from {}...'.format(input_fname))
         input_fname = os.path.abspath(input_fname)
@@ -205,12 +261,20 @@ class RawGDF(BaseRaw):
         self.set_annotations(Annotations(onset=onset, duration=duration,
                                          description=desc, orig_time=None))
 
+        _deprecate_montage(self, "read_raw_gdf", montage)
+
     @verbose
     def _read_segment_file(self, data, idx, fi, start, stop, cals, mult):
         """Read a chunk of raw data."""
         return _read_segment_file(data, idx, fi, start, stop,
                                   self._raw_extras[fi], self.info['chs'],
                                   self._filenames[fi])
+
+    @copy_function_doc_to_method_doc(find_edf_events)
+    @deprecated('find_edf_events is deprecated in 0.18, and will be removed'
+                ' in 0.19. Please use `mne.events_from_annotations` instead')
+    def find_edf_events(self):
+        return events_from_annotations(self)
 
 
 def _read_ch(fid, subtype, samp, dtype_byte, dtype=None):
@@ -340,9 +404,6 @@ def _read_segment_file(data, idx, fi, start, stop, raw_extras, chs, filenames):
                               2**17 - 1)
         data[stim_channel_idx, :] = stim
 
-    if len(tal_data) > 1:
-        tal_data = np.concatenate([tal.ravel() for tal in tal_data])
-        tal_data = tal_data[np.newaxis, :]
     return tal_data
 
 
@@ -506,19 +567,6 @@ def _get_info(fname, stim_channel, eog, misc, exclude, preload):
     return info, edf_info, orig_units
 
 
-def _parse_prefilter_string(prefiltering):
-    """Parse prefilter string from EDF+ and BDF headers."""
-    highpass = np.array(
-        [v for hp in [re.findall(r'HP:\s*([0-9]+[.]*[0-9]*)', filt)
-                      for filt in prefiltering] for v in hp]
-    )
-    lowpass = np.array(
-        [v for hp in [re.findall(r'LP:\s*([0-9]+[.]*[0-9]*)', filt)
-                      for filt in prefiltering] for v in hp]
-    )
-    return highpass, lowpass
-
-
 def _read_edf_header(fname, exclude):
     """Read header information from EDF+ or BDF file."""
     edf_info = {'events': []}
@@ -603,7 +651,10 @@ def _read_edf_header(fname, exclude):
                                 for ch in channels])[sel]
         prefiltering = [fid.read(80).decode().strip(' \x00')
                         for ch in channels][:-1]
-        highpass, lowpass = _parse_prefilter_string(prefiltering)
+        highpass = np.ravel([re.findall(r'HP:\s+(\w+)', filt)
+                             for filt in prefiltering])
+        lowpass = np.ravel([re.findall(r'LP:\s+(\w+)', filt)
+                            for filt in prefiltering])
 
         # number of samples per record
         n_samps = np.array([int(fid.read(8).decode()) for ch
@@ -738,7 +789,10 @@ def _read_gdf_header(fname, exclude):
             digital_max = np.fromfile(fid, np.int64, len(channels))
             prefiltering = [fid.read(80).decode().strip(' \x00')
                             for ch in channels][:-1]
-            highpass, lowpass = _parse_prefilter_string(prefiltering)
+            highpass = np.ravel([re.findall(r'HP:\s+(\w+)', filt)
+                                 for filt in prefiltering])
+            lowpass = np.ravel([re.findall('LP:\\s+(\\w+)', filt)
+                                for filt in prefiltering])
 
             # n samples per record
             n_samps = np.fromfile(fid, np.int32, len(channels))
@@ -1097,7 +1151,7 @@ def _find_tal_idx(ch_names):
 
 
 @fill_doc
-def read_raw_edf(input_fname, eog=None, misc=None,
+def read_raw_edf(input_fname, montage='deprecated', eog=None, misc=None,
                  stim_channel='auto', exclude=(), preload=False, verbose=None):
     """Reader function for EDF or EDF+ files.
 
@@ -1105,6 +1159,7 @@ def read_raw_edf(input_fname, eog=None, misc=None,
     ----------
     input_fname : str
         Path to the EDF or EDF+ file.
+    %(montage_deprecated)s
     eog : list or tuple
         Names of channels or list of indices that should be designated EOG
         channels. Values should correspond to the electrodes in the file.
@@ -1132,16 +1187,6 @@ def read_raw_edf(input_fname, eog=None, misc=None,
     %(preload)s
     %(verbose)s
 
-    Returns
-    -------
-    raw : instance of RawEDF
-        The raw instance.
-
-    See Also
-    --------
-    mne.io.read_raw_bdf : Reader function for BDF files.
-    mne.io.read_raw_gdf : Reader function for GDF files.
-
     Notes
     -----
     It is worth noting that in some special cases, it may be necessary to shift
@@ -1158,13 +1203,19 @@ def read_raw_edf(input_fname, eog=None, misc=None,
     If channels named 'status' or 'trigger' are present, they are considered as
     STIM channels by default. Use func:`mne.find_events` to parse events
     encoded in such analog stim channels.
+
+    See Also
+    --------
+    mne.io.read_raw_bdf : Reader function for BDF files.
+    mne.io.read_raw_gdf : Reader function for GDF files.
     """
+    print("From Dev..")
     input_fname = os.path.abspath(input_fname)
     ext = os.path.splitext(input_fname)[1][1:].lower()
     if ext == 'gdf':
         warn('The use of read_raw_edf for GDF files is deprecated. Please use '
              'read_raw_gdf instead.', DeprecationWarning)
-        return RawGDF(input_fname=input_fname, eog=eog,
+        return RawGDF(input_fname=input_fname, montage=montage, eog=eog,
                       misc=misc, stim_channel=stim_channel, exclude=exclude,
                       preload=preload, verbose=verbose)
     elif ext == 'bdf':
@@ -1173,13 +1224,13 @@ def read_raw_edf(input_fname, eog=None, misc=None,
     elif ext not in ('edf', 'bdf'):
         raise NotImplementedError('Only EDF and BDF files are supported, got '
                                   '{}.'.format(ext))
-    return RawEDF(input_fname=input_fname, eog=eog, misc=misc,
+    return RawEDF(input_fname=input_fname, montage=montage, eog=eog, misc=misc,
                   stim_channel=stim_channel, exclude=exclude, preload=preload,
                   verbose=verbose)
 
 
 @fill_doc
-def read_raw_bdf(input_fname, eog=None, misc=None,
+def read_raw_bdf(input_fname, montage='deprecated', eog=None, misc=None,
                  stim_channel='auto', exclude=(), preload=False, verbose=None):
     """Reader function for BDF files.
 
@@ -1187,6 +1238,7 @@ def read_raw_bdf(input_fname, eog=None, misc=None,
     ----------
     input_fname : str
         Path to the BDF file.
+    %(montage_deprecated)s
     eog : list or tuple
         Names of channels or list of indices that should be designated EOG
         channels. Values should correspond to the electrodes in the file.
@@ -1213,16 +1265,6 @@ def read_raw_bdf(input_fname, eog=None, misc=None,
         different sampling rates to avoid unnecessary resampling.
     %(preload)s
     %(verbose)s
-
-    Returns
-    -------
-    raw : instance of RawEDF
-        The raw instance.
-
-    See Also
-    --------
-    mne.io.read_raw_edf : Reader function for EDF and EDF+ files.
-    mne.io.read_raw_gdf : Reader function for GDF files.
 
     Notes
     -----
@@ -1259,19 +1301,24 @@ def read_raw_bdf(input_fname, eog=None, misc=None,
     If channels named 'status' or 'trigger' are present, they are considered as
     STIM channels by default. Use func:`mne.find_events` to parse events
     encoded in such analog stim channels.
+
+    See Also
+    --------
+    mne.io.read_raw_edf : Reader function for EDF and EDF+ files.
+    mne.io.read_raw_gdf : Reader function for GDF files.
     """
     input_fname = os.path.abspath(input_fname)
     ext = os.path.splitext(input_fname)[1][1:].lower()
     if ext != 'bdf':
         raise NotImplementedError('Only BDF files are supported, got '
                                   '{}.'.format(ext))
-    return RawEDF(input_fname=input_fname, eog=eog, misc=misc,
+    return RawEDF(input_fname=input_fname, montage=montage, eog=eog, misc=misc,
                   stim_channel=stim_channel, exclude=exclude, preload=preload,
                   verbose=verbose)
 
 
 @fill_doc
-def read_raw_gdf(input_fname, eog=None, misc=None,
+def read_raw_gdf(input_fname, montage='deprecated', eog=None, misc=None,
                  stim_channel='auto', exclude=(), preload=False, verbose=None):
     """Reader function for GDF files.
 
@@ -1279,6 +1326,10 @@ def read_raw_gdf(input_fname, eog=None, misc=None,
     ----------
     input_fname : str
         Path to the GDF file.
+    montage : str | None | instance of Montage
+        Path or instance of montage containing electrode positions. If None,
+        sensor locations are (0,0,0). See the documentation of
+        :func:`mne.channels.read_montage` for more information.
     eog : list or tuple
         Names of channels or list of indices that should be designated EOG
         channels. Values should correspond to the electrodes in the file.
@@ -1298,28 +1349,23 @@ def read_raw_gdf(input_fname, eog=None, misc=None,
     %(preload)s
     %(verbose)s
 
-    Returns
-    -------
-    raw : instance of RawGDF
-        The raw instance.
-
-    See Also
-    --------
-    mne.io.read_raw_edf : Reader function for EDF and EDF+ files.
-    mne.io.read_raw_bdf : Reader function for BDF files.
-
     Notes
     -----
     If channels named 'status' or 'trigger' are present, they are considered as
     STIM channels by default. Use func:`mne.find_events` to parse events
     encoded in such analog stim channels.
+
+    See Also
+    --------
+    mne.io.read_raw_edf : Reader function for EDF and EDF+ files.
+    mne.io.read_raw_bdf : Reader function for BDF files.
     """
     input_fname = os.path.abspath(input_fname)
     ext = os.path.splitext(input_fname)[1][1:].lower()
     if ext != 'gdf':
         raise NotImplementedError('Only GDF files are supported, got '
                                   '{}.'.format(ext))
-    return RawGDF(input_fname=input_fname, eog=eog, misc=misc,
+    return RawGDF(input_fname=input_fname, montage=montage, eog=eog, misc=misc,
                   stim_channel=stim_channel, exclude=exclude, preload=preload,
                   verbose=verbose)
 
